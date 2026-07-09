@@ -8,6 +8,7 @@
     "deploy": "vercel --prod"
   },
   "dependencies": {
+    "@vercel/functions": "^2.0.0",
     "@vercel/kv": "^3.0.0",
     "resend": "^6.16.0"
   },

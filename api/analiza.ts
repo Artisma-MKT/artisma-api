@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
+import { waitUntil } from '@vercel/functions'
 import { Resend } from 'resend'
 
 const WEBHOOK_GHL = 'https://services.leadconnectorhq.com/hooks/21Q9Ac26brV00Bu7vffn/webhook-trigger/afbc31bd-ffcb-452d-90e4-33b0fecc3753'
@@ -120,33 +121,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ])
     }
 
-    fetch(WEBHOOK_DIAGNOSTICO, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        correo: email.trim(),
-        pagina_web: domain,
-        score_general: overall,
-        score_velocidad: velocidad ?? 0,
-        score_seo: seo,
-        score_visibilidad_google: googleVisibility ?? 0,
-        score_herramientas: herramientas ?? 0,
-        score_captacion: captacion ?? 0,
-      }),
-    }).catch(() => {})
+    const postWebhook = async (name: string, url: string, payload: unknown) => {
+      try {
+        const r = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+        if (!r.ok) {
+          const body = await r.text().catch(() => '')
+          console.error(`[api/analiza] ${name} non-2xx`, r.status, body.slice(0, 300))
+        }
+      } catch (err) {
+        console.error(`[api/analiza] ${name} failed`, err)
+      }
+    }
 
-    fetch(WEBHOOK_GHL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        nombre: email.trim(),
-        correo: email.trim(),
-        horario_1: `Sitio analizado: ${domain}`,
-        horario_2: `Score: ${overall}/100`,
-      }),
-    }).catch(() => {})
+    waitUntil(postWebhook('WEBHOOK_DIAGNOSTICO', WEBHOOK_DIAGNOSTICO, {
+      correo: email.trim(),
+      pagina_web: domain,
+      score_general: overall,
+      score_velocidad: velocidad ?? 0,
+      score_seo: seo,
+      score_visibilidad_google: googleVisibility ?? 0,
+      score_herramientas: herramientas ?? 0,
+      score_captacion: captacion ?? 0,
+    }))
 
-    sendNotifications(email.trim(), domain, overall, { velocidad, seo, googleVisibility, herramientas, captacion }, signals).catch(() => {})
+    waitUntil(postWebhook('WEBHOOK_GHL', WEBHOOK_GHL, {
+      nombre: email.trim(),
+      correo: email.trim(),
+      horario_1: `Sitio analizado: ${domain}`,
+      horario_2: `Score: ${overall}/100`,
+    }))
+
+    waitUntil(
+      sendNotifications(email.trim(), domain, overall, { velocidad, seo, googleVisibility, herramientas, captacion }, signals)
+        .catch(err => console.error('[api/analiza] sendNotifications failed', err))
+    )
 
     return res.status(200).json({
       domain,
