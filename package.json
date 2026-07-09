@@ -1,0 +1,19 @@
+{
+  "name": "artisma-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Serverless API endpoint for artismamkt.com website diagnostic tool",
+  "scripts": {
+    "dev": "vercel dev",
+    "deploy": "vercel --prod"
+  },
+  "dependencies": {
+    "@vercel/kv": "^3.0.0",
+    "resend": "^6.16.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@vercel/node": "^5.0.0",
+    "typescript": "^5.7.0"
+  }
+}
