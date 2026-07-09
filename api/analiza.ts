@@ -135,6 +135,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }),
     }).catch(() => {})
 
+    fetch(WEBHOOK_GHL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        nombre: email.trim(),
+        correo: email.trim(),
+        horario_1: `Sitio analizado: ${domain}`,
+        horario_2: `Score: ${overall}/100`,
+      }),
+    }).catch(() => {})
+
     sendNotifications(email.trim(), domain, overall, { velocidad, seo, googleVisibility, herramientas, captacion }, signals).catch(() => {})
 
     return res.status(200).json({
@@ -251,17 +262,6 @@ type Scores = { velocidad: number | null; seo: number; googleVisibility: number 
 async function sendNotifications(email: string, domain: string, overall: number, scores: Scores, signals: Signals) {
   const bar = (n: number | null) => n === null ? '— no medible' : `${'█'.repeat(Math.round(n / 10))}${'░'.repeat(10 - Math.round(n / 10))} ${n}/100`
   const bool = (b: boolean) => b ? '✅' : '❌'
-
-  await fetch(WEBHOOK_GHL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      nombre: email,
-      correo: email,
-      horario_1: `Sitio analizado: ${domain}`,
-      horario_2: `Score: ${overall}/100`,
-    }),
-  }).catch(() => {})
 
   const resendKey = process.env.RESEND_API_KEY
   if (!resendKey) return
