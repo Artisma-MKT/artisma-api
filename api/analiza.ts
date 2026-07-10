@@ -5,7 +5,24 @@ import { Resend } from 'resend'
 const WEBHOOK_GHL = 'https://services.leadconnectorhq.com/hooks/21Q9Ac26brV00Bu7vffn/webhook-trigger/afbc31bd-ffcb-452d-90e4-33b0fecc3753'
 const WEBHOOK_DIAGNOSTICO = 'https://services.leadconnectorhq.com/hooks/21Q9Ac26brV00Bu7vffn/webhook-trigger/46cf2dc2-7f69-4d43-a587-efc5243d6c70'
 
+const ALLOWED_ORIGINS = [
+  'https://www.artismamkt.com',
+  'https://artismamkt.com',
+  'http://localhost:3000',
+  'http://localhost:3001',
+]
+
+function setCors(req: VercelRequest, res: VercelResponse) {
+  const origin = typeof req.headers.origin === 'string' ? req.headers.origin : ''
+  const allowed = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]
+  res.setHeader('Access-Control-Allow-Origin', allowed)
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+  res.setHeader('Access-Control-Max-Age', '86400')
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  setCors(req, res)
   if (req.method === 'OPTIONS') return res.status(204).end()
   if (req.method !== 'POST') return res.status(405).json({ error: 'method_not_allowed' })
 
