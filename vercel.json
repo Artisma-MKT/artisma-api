@@ -1,4 +1,7 @@
 {
+  "functions": {
+    "api/analiza.ts": { "maxDuration": 60 }
+  },
   "headers": [
     {
       "source": "/api/(.*)",
