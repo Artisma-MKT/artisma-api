@@ -2,7 +2,6 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { waitUntil } from '@vercel/functions'
 import { Resend } from 'resend'
 
-const WEBHOOK_GHL = 'https://services.leadconnectorhq.com/hooks/21Q9Ac26brV00Bu7vffn/webhook-trigger/afbc31bd-ffcb-452d-90e4-33b0fecc3753'
 const WEBHOOK_DIAGNOSTICO = 'https://services.leadconnectorhq.com/hooks/21Q9Ac26brV00Bu7vffn/webhook-trigger/46cf2dc2-7f69-4d43-a587-efc5243d6c70'
 
 const ALLOWED_ORIGINS = [
@@ -163,13 +162,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       score_visibilidad_google: googleVisibility ?? 0,
       score_herramientas: herramientas ?? 0,
       score_captacion: captacion ?? 0,
-    }))
-
-    waitUntil(postWebhook('WEBHOOK_GHL', WEBHOOK_GHL, {
-      nombre: email.trim(),
-      correo: email.trim(),
-      horario_1: `Sitio analizado: ${domain}`,
-      horario_2: `Score: ${overall}/100`,
     }))
 
     waitUntil(
