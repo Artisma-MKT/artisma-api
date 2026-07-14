@@ -188,7 +188,10 @@ async function fetchPageSpeed(url: string) {
     return null
   })
   if (!res?.ok) {
-    if (res) console.error('[fetchPageSpeed] intento 1 HTTP', res.status)
+    if (res) {
+      const body = await res.text().catch(() => '')
+      console.error('[fetchPageSpeed] intento 1 HTTP', res.status, 'url=', url, 'keyPresent=', !!key, 'body=', body.slice(0, 500))
+    }
     await new Promise(r => setTimeout(r, 1500))
     res = await fetch(endpoint, { signal: AbortSignal.timeout(38000) }).catch((err) => {
       console.error('[fetchPageSpeed] intento 2 falló:', err?.message ?? err)
@@ -196,7 +199,10 @@ async function fetchPageSpeed(url: string) {
     })
   }
   if (!res?.ok) {
-    if (res) console.error('[fetchPageSpeed] intento 2 HTTP', res.status)
+    if (res) {
+      const body = await res.text().catch(() => '')
+      console.error('[fetchPageSpeed] intento 2 HTTP', res.status, 'body=', body.slice(0, 500))
+    }
     return null
   }
   const data = await res.json() as {
