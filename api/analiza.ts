@@ -153,22 +153,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    // TEMP: desactivado durante pruebas de la API key de PageSpeed
-    // waitUntil(postWebhook('WEBHOOK_DIAGNOSTICO', WEBHOOK_DIAGNOSTICO, {
-    //   correo: email.trim(),
-    //   pagina_web: domain,
-    //   score_general: overall,
-    //   score_velocidad: velocidad ?? 0,
-    //   score_seo: seo,
-    //   score_visibilidad_google: googleVisibility ?? 0,
-    //   score_herramientas: herramientas ?? 0,
-    //   score_captacion: captacion ?? 0,
-    // }))
+    waitUntil(postWebhook('WEBHOOK_DIAGNOSTICO', WEBHOOK_DIAGNOSTICO, {
+      correo: email.trim(),
+      pagina_web: domain,
+      score_general: overall,
+      score_velocidad: velocidad ?? 0,
+      score_seo: seo,
+      score_visibilidad_google: googleVisibility ?? 0,
+      score_herramientas: herramientas ?? 0,
+      score_captacion: captacion ?? 0,
+    }))
 
-    // waitUntil(
-    //   sendNotifications(email.trim(), domain, overall, { velocidad, seo, googleVisibility, herramientas, captacion }, signals)
-    //     .catch(err => console.error('[api/analiza] sendNotifications failed', err))
-    // )
+    waitUntil(
+      sendNotifications(email.trim(), domain, overall, { velocidad, seo, googleVisibility, herramientas, captacion }, signals)
+        .catch(err => console.error('[api/analiza] sendNotifications failed', err))
+    )
 
     return res.status(200).json({
       domain,
