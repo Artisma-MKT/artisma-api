@@ -1,6 +1,6 @@
 {
   "functions": {
-    "api/analiza.ts": { "maxDuration": 60 }
+    "api/analiza.ts": { "maxDuration": 90 }
   },
   "headers": [
     {

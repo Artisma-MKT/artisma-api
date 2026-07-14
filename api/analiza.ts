@@ -191,12 +191,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 async function fetchPageSpeed(url: string) {
   const key = process.env.PAGESPEED_API_KEY
   const endpoint = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(url)}&strategy=mobile&category=performance&category=seo${key ? `&key=${key}` : ''}`
-  let res = await fetch(endpoint, { signal: AbortSignal.timeout(35000) }).catch(() => null)
+  let res = await fetch(endpoint, { signal: AbortSignal.timeout(38000) }).catch((err) => {
+    console.error('[fetchPageSpeed] intento 1 falló:', err?.message ?? err)
+    return null
+  })
   if (!res?.ok) {
+    if (res) console.error('[fetchPageSpeed] intento 1 HTTP', res.status)
     await new Promise(r => setTimeout(r, 1500))
-    res = await fetch(endpoint, { signal: AbortSignal.timeout(35000) }).catch(() => null)
+    res = await fetch(endpoint, { signal: AbortSignal.timeout(38000) }).catch((err) => {
+      console.error('[fetchPageSpeed] intento 2 falló:', err?.message ?? err)
+      return null
+    })
   }
-  if (!res?.ok) return null
+  if (!res?.ok) {
+    if (res) console.error('[fetchPageSpeed] intento 2 HTTP', res.status)
+    return null
+  }
   const data = await res.json() as {
     lighthouseResult?: {
       runtimeError?: { code: string }
