@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { waitUntil } from '@vercel/functions'
 import { Resend } from 'resend'
+import { randomUUID } from 'node:crypto'
 
 const WEBHOOK_DIAGNOSTICO = 'https://services.leadconnectorhq.com/hooks/21Q9Ac26brV00Bu7vffn/webhook-trigger/46cf2dc2-7f69-4d43-a587-efc5243d6c70'
 
@@ -26,14 +27,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'method_not_allowed' })
 
   try {
-    const { url, email, _hp, _ms } = req.body as { url: string; email: string; _hp?: string; _ms?: number }
+    const { url, email, _hp, _ms, mode, token } = req.body as {
+      url: string; email?: string; _hp?: string; _ms?: number; mode?: string; token?: string
+    }
+
+    const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
+
+    // Modo 'email': en las landing pages el reporte se entrega sin pedir
+    // correo, y este se ofrece como opcional al final. Aqui solo se adjunta
+    // al analisis que ya se hizo — no se vuelve a analizar el sitio.
+    if (mode === 'email') {
+      if (!email?.trim() || !EMAIL_RE.test(email.trim())) {
+        return res.status(400).json({ error: 'invalid_input' })
+      }
+      return await handleEmailOptIn(res, email.trim(), url, token, req.body as Record<string, unknown>)
+    }
 
     if (_hp || (_ms !== undefined && _ms < 2000)) {
       return res.status(400).json({ error: 'invalid_input' })
     }
 
-    const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
-    if (!url?.trim() || !email?.trim() || !EMAIL_RE.test(email.trim())) {
+    // El correo es opcional: la pagina principal lo pide por adelantado,
+    // las landing pages no.
+    if (!url?.trim() || (email?.trim() && !EMAIL_RE.test(email.trim()))) {
       return res.status(400).json({ error: 'invalid_input' })
     }
 
@@ -53,11 +69,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ? forwardedFor.split(',')[0]?.trim() ?? 'unknown'
         : 'unknown'
       const ipKey = `analiza:ip:${ip}`
-      const emailKey = `analiza:email:${email.toLowerCase()}`
 
       const [ipCount, emailExists] = await Promise.all([
         kv.get<number>(ipKey),
-        kv.get(emailKey),
+        email?.trim() ? kv.get(`analiza:email:${email.trim().toLowerCase()}`) : Promise.resolve(null),
       ])
 
       if ((ipCount ?? 0) >= 3) {
@@ -117,6 +132,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const available = weighted.filter(([v]) => v !== null) as [number, number][]
     const totalWeight = available.reduce((s, [, w]) => s + w, 0)
     const overall = Math.round(available.reduce((s, [v, w]) => s + v * (w / totalWeight), 0))
+    const scores: Scores = { velocidad, seo, googleVisibility, herramientas, captacion }
+    const resultToken = randomUUID()
 
     if (process.env.KV_REST_API_URL) {
       const { kv } = await import('@vercel/kv')
@@ -125,7 +142,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ? forwardedFor.split(',')[0]?.trim() ?? 'unknown'
         : 'unknown'
       const ipKey = `analiza:ip:${ip}`
-      const emailKey = `analiza:email:${email.toLowerCase()}`
       const now = new Date()
       const midnight = new Date(now)
       midnight.setHours(24, 0, 0, 0)
@@ -133,7 +149,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const currentCount = await kv.get<number>(ipKey) ?? 0
       await Promise.all([
         kv.set(ipKey, currentCount + 1, { ex: ipTtl }),
-        kv.set(emailKey, domain, { ex: 60 * 60 * 24 * 30 }),
+        // El resultado se cachea una hora para que, si el visitante pide el
+        // correo despues de ver el reporte, no haya que reanalizar el sitio.
+        kv.set(`analiza:token:${resultToken}`, { domain, overall, scores }, { ex: 60 * 60 }),
+        email?.trim()
+          ? kv.set(`analiza:email:${email.trim().toLowerCase()}`, domain, { ex: 60 * 60 * 24 * 30 })
+          : Promise.resolve(),
       ])
     }
 
@@ -153,27 +174,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    waitUntil(postWebhook('WEBHOOK_DIAGNOSTICO', WEBHOOK_DIAGNOSTICO, {
-      correo: email.trim(),
-      pagina_web: domain,
-      score_general: overall,
-      score_velocidad: velocidad ?? 0,
-      score_seo: seo,
-      score_visibilidad_google: googleVisibility ?? 0,
-      score_herramientas: herramientas ?? 0,
-      score_captacion: captacion ?? 0,
-    }))
+    // Sin correo no hay contacto que crear en GHL. En ese caso el analisis
+    // solo se notifica internamente; el webhook se dispara despues, si el
+    // visitante pide los resultados por correo desde el reporte.
+    if (email?.trim()) {
+      waitUntil(postWebhook('WEBHOOK_DIAGNOSTICO', WEBHOOK_DIAGNOSTICO, {
+        correo: email.trim(),
+        pagina_web: domain,
+        score_general: overall,
+        score_velocidad: velocidad ?? 0,
+        score_seo: seo,
+        score_visibilidad_google: googleVisibility ?? 0,
+        score_herramientas: herramientas ?? 0,
+        score_captacion: captacion ?? 0,
+      }))
+    }
 
     waitUntil(
-      sendNotifications(email.trim(), domain, overall, { velocidad, seo, googleVisibility, herramientas, captacion }, signals)
+      sendNotifications(email?.trim() || null, domain, overall, scores, signals)
         .catch(err => console.error('[api/analiza] sendNotifications failed', err))
     )
 
-    return res.status(200).json({
-      domain,
-      overall,
-      scores: { velocidad, seo, googleVisibility, herramientas, captacion },
-    })
+    return res.status(200).json({ domain, overall, scores, token: resultToken })
   } catch (err) {
     console.error('[api/analiza]', err)
     return res.status(500).json({ error: 'server_error' })
@@ -296,7 +318,100 @@ function detectSignals(html: string) {
 type Signals = ReturnType<typeof detectSignals>
 type Scores = { velocidad: number | null; seo: number; googleVisibility: number | null; herramientas: number | null; captacion: number | null }
 
-async function sendNotifications(email: string, domain: string, overall: number, scores: Scores, signals: Signals) {
+type CachedResult = { domain: string; overall: number; scores: Scores }
+
+const clampScore = (v: unknown): number => {
+  const n = typeof v === 'number' ? v : Number(v)
+  return Number.isFinite(n) ? Math.min(100, Math.max(0, Math.round(n))) : 0
+}
+
+// Adjunta un correo a un analisis ya realizado. No vuelve a analizar el
+// sitio: recupera los scores del cache por token.
+//
+// Sin Vercel KV el cache no existe, asi que se aceptan los scores que
+// reenvia el cliente. Son datos publicos de rendimiento y el peor caso es
+// un contacto con cifras falsas en GHL — el mismo riesgo que ya existe al
+// poder enviar cualquier correo. Perder los scores, en cambio, romperia
+// los workflows de GHL que dependen de ellos.
+async function handleEmailOptIn(
+  res: VercelResponse,
+  email: string,
+  url: string | undefined,
+  token: string | undefined,
+  body: Record<string, unknown>,
+) {
+  let cached: CachedResult | null = null
+  let domain = ''
+
+  try {
+    domain = new URL(`https://${(url ?? '').trim().replace(/^https?:\/\//, '')}`).hostname.replace(/^www\./, '')
+  } catch {
+    domain = ''
+  }
+
+  if (process.env.KV_REST_API_URL) {
+    const { kv } = await import('@vercel/kv')
+    const emailKey = `analiza:email:${email.toLowerCase()}`
+
+    if (await kv.get(emailKey)) {
+      return res.status(429).json({ error: 'duplicate_email' })
+    }
+
+    if (token) {
+      cached = await kv.get<CachedResult>(`analiza:token:${token}`)
+      if (cached?.domain) domain = cached.domain
+    }
+
+    await kv.set(emailKey, domain, { ex: 60 * 60 * 24 * 30 })
+  }
+
+  if (!domain) return res.status(400).json({ error: 'invalid_domain' })
+
+  const fallback = (body.scores ?? {}) as Record<string, unknown>
+  const s = cached?.scores ?? {
+    velocidad: clampScore(fallback.velocidad),
+    seo: clampScore(fallback.seo),
+    googleVisibility: clampScore(fallback.googleVisibility),
+    herramientas: clampScore(fallback.herramientas),
+    captacion: clampScore(fallback.captacion),
+  }
+  const overall = cached?.overall ?? clampScore(body.overall)
+
+  try {
+    const r = await fetch(WEBHOOK_DIAGNOSTICO, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        correo: email,
+        pagina_web: domain,
+        score_general: overall,
+        score_velocidad: s?.velocidad ?? 0,
+        score_seo: s?.seo ?? 0,
+        score_visibilidad_google: s?.googleVisibility ?? 0,
+        score_herramientas: s?.herramientas ?? 0,
+        score_captacion: s?.captacion ?? 0,
+      }),
+    })
+    if (!r.ok) {
+      const body = await r.text().catch(() => '')
+      console.error('[api/analiza] WEBHOOK_DIAGNOSTICO non-2xx', r.status, body.slice(0, 300))
+    }
+  } catch (err) {
+    console.error('[api/analiza] WEBHOOK_DIAGNOSTICO failed', err)
+  }
+
+  if (!cached) {
+    console.warn('[api/analiza] email opt-in sin cache, usando scores del cliente', {
+      domain,
+      hasToken: Boolean(token),
+      kvEnabled: Boolean(process.env.KV_REST_API_URL),
+    })
+  }
+
+  return res.status(200).json({ ok: true })
+}
+
+async function sendNotifications(email: string | null, domain: string, overall: number, scores: Scores, signals: Signals) {
   const bar = (n: number | null) => n === null ? '— no medible' : `${'█'.repeat(Math.round(n / 10))}${'░'.repeat(10 - Math.round(n / 10))} ${n}/100`
   const bool = (b: boolean) => b ? '✅' : '❌'
 
@@ -307,14 +422,15 @@ async function sendNotifications(email: string, domain: string, overall: number,
   const to = process.env.INTERNAL_NOTIFY_EMAIL ?? 'director.arturo@artismamkt.com'
 
   await resend.emails.send({
-    from: 'Artisma Analizador <notificaciones@artismamkt.com>',
+    // Debe salir de un dominio verificado en Resend o el envio se rechaza.
+    from: process.env.RESEND_FROM ?? 'Artisma Analizador <reportes@reportes.artismamkt.com>',
     to,
-    subject: `Nuevo diagnóstico: ${domain} — ${overall}/100`,
+    subject: `Nuevo diagnóstico: ${domain} — ${overall}/100${email ? '' : ' (sin correo)'}`,
     html: `
       <h2 style="font-family:sans-serif">Nuevo diagnóstico de sitio web</h2>
       <table style="font-family:monospace;border-collapse:collapse">
         <tr><td style="padding:4px 12px 4px 0"><strong>Dominio</strong></td><td>${domain}</td></tr>
-        <tr><td style="padding:4px 12px 4px 0"><strong>Email</strong></td><td>${email}</td></tr>
+        <tr><td style="padding:4px 12px 4px 0"><strong>Email</strong></td><td>${email ?? '— no proporcionado'}</td></tr>
         <tr><td style="padding:4px 12px 4px 0"><strong>Score general</strong></td><td><strong>${overall}/100</strong></td></tr>
       </table>
       <h3 style="font-family:sans-serif;margin-top:24px">Scores por sección</h3>
@@ -337,5 +453,5 @@ Captación:         ${bar(scores.captacion)}</pre>
         <tr><td style="padding:3px 16px 3px 0">Newsletter</td><td>${bool(signals.hasNewsletter)}</td></tr>
       </table>
     `,
-  }).catch(() => {})
+  }).catch(err => console.error('[api/analiza] resend send failed', err))
 }
