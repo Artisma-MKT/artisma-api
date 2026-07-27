@@ -18,11 +18,50 @@ const SECTION_LABELS: Array<[keyof Scores, string]> = [
   ['captacion', 'Facilidad para contactarte'],
 ]
 
-function overallVerdict(n: number) {
-  if (n >= 85) return 'Tu sitio tiene bases sólidas.'
-  if (n >= 65) return 'Tu sitio está bien, pero puede ir mucho más lejos.'
-  if (n >= 40) return 'Tu sitio tiene oportunidades claras de mejora.'
-  return 'Tu sitio necesita atención urgente.'
+const scoreColor = (n: number | null) =>
+  n === null ? '#888888' : n >= 75 ? '#3f9c54' : n >= 50 ? '#a8862c' : '#c4453c'
+
+// Barras en HTML, no caracteres de bloque dentro de un <pre>: los clientes
+// de correo no garantizan una fuente monoespaciada y las etiquetas de
+// distinto largo desalinean las barras.
+function scoreRowsHtml(scores: Scores) {
+  return SECTION_LABELS.map(([key, label]) => {
+    const v = scores[key]
+    return `
+      <tr>
+        <td style="padding:10px 0 2px;font:14px/1.4 sans-serif;color:#333">${label}</td>
+        <td style="padding:10px 0 2px;font:600 14px/1.4 sans-serif;color:${scoreColor(v)};text-align:right;white-space:nowrap">${v === null ? '—' : `${v}/100`}</td>
+      </tr>
+      <tr>
+        <td colspan="2" style="padding:0 0 6px">
+          <div style="height:6px;background:#ececec;border-radius:3px;font-size:0;line-height:0">
+            <div style="height:6px;width:${v ?? 0}%;background:${scoreColor(v)};border-radius:3px"></div>
+          </div>
+        </td>
+      </tr>`
+  }).join('')
+}
+
+// Cada banda cierra con un siguiente paso concreto: un veredicto solo
+// diagnostica, y el correo tiene que dejar claro que sigue. Las
+// recomendaciones van alineadas con los tres workflows de GHL.
+function overallVerdict(n: number): { verdict: string; next: string } {
+  if (n >= 85) return {
+    verdict: 'Tu sitio tiene bases sólidas.',
+    next: 'Tu sitio ya no es el cuello de botella, así que lo que mueve la aguja ahora es la prospección activa: campañas de Google Ads con landing pages diseñadas para B2B, o correo en frío dirigido a tomadores de decisión de tu industria.',
+  }
+  if (n >= 65) return {
+    verdict: 'Tu sitio está bien, pero puede ir mucho más lejos.',
+    next: 'La base técnica está. Lo que falta es contenido constante — artículos en blog y LinkedIn — para que el sitio traiga prospectos de forma sostenida y no solo cuando hay presupuesto de anuncios.',
+  }
+  if (n >= 40) return {
+    verdict: 'Tu sitio tiene oportunidades claras de mejora.',
+    next: 'Hay conversión que se está quedando en la mesa. Un rediseño enfocado en captación suele ser el primer paso, acompañado de contenido para sostener el tráfico en el tiempo.',
+  }
+  return {
+    verdict: 'Tu sitio necesita atención urgente.',
+    next: 'Varias áreas están por debajo de lo que necesita una empresa B2B para generar prospectos en línea. El primer paso es un rediseño que resuelva la captación desde la estructura, no con parches.',
+  }
 }
 
 const ALLOWED_ORIGINS = [
@@ -354,25 +393,6 @@ async function sendReportEmail(email: string, domain: string, overall: number, s
     return
   }
 
-  const color = (n: number | null) => n === null ? '#888888' : n >= 75 ? '#3f9c54' : n >= 50 ? '#a8862c' : '#c4453c'
-
-  const rows = SECTION_LABELS.map(([key, label]) => {
-    const v = scores[key]
-    const width = v === null ? 0 : v
-    return `
-      <tr>
-        <td style="padding:10px 0 2px;font:14px/1.4 sans-serif;color:#333">${label}</td>
-        <td style="padding:10px 0 2px;font:600 14px/1.4 sans-serif;color:${color(v)};text-align:right">${v === null ? '—' : `${v}/100`}</td>
-      </tr>
-      <tr>
-        <td colspan="2" style="padding:0 0 6px">
-          <div style="height:6px;background:#ececec;border-radius:3px">
-            <div style="height:6px;width:${width}%;background:${color(v)};border-radius:3px"></div>
-          </div>
-        </td>
-      </tr>`
-  }).join('')
-
   await new Resend(resendKey).emails.send({
     from: RESEND_FROM,
     to: email,
@@ -381,17 +401,22 @@ async function sendReportEmail(email: string, domain: string, overall: number, s
       <div style="max-width:560px;margin:0 auto;padding:32px 24px;font-family:sans-serif;color:#222">
         <p style="font:600 11px/1 sans-serif;letter-spacing:2px;text-transform:uppercase;color:#a8862c;margin:0 0 16px">Diagnóstico web</p>
         <h1 style="font:600 22px/1.3 sans-serif;margin:0 0 6px">${domain}</h1>
-        <p style="font:15px/1.5 sans-serif;color:#555;margin:0 0 28px">${overallVerdict(overall)}</p>
+        <p style="font:15px/1.5 sans-serif;color:#555;margin:0 0 28px">${overallVerdict(overall).verdict}</p>
 
         <div style="text-align:center;padding:24px 0;border-top:1px solid #e6e6e6;border-bottom:1px solid #e6e6e6;margin-bottom:8px">
-          <div style="font:700 40px/1 sans-serif;color:${color(overall)}">${overall}<span style="font-size:18px;color:#999">/100</span></div>
+          <div style="font:700 40px/1 sans-serif;color:${scoreColor(overall)}">${overall}<span style="font-size:18px;color:#999">/100</span></div>
           <div style="font:11px/1 sans-serif;letter-spacing:1.5px;text-transform:uppercase;color:#999;margin-top:8px">Puntuación general</div>
         </div>
 
-        <table style="width:100%;border-collapse:collapse;margin-bottom:32px">${rows}</table>
+        <table style="width:100%;border-collapse:collapse;margin-bottom:32px">${scoreRowsHtml(scores)}</table>
 
-        <div style="text-align:center;padding-top:24px;border-top:1px solid #e6e6e6">
-          <p style="font:15px/1.5 sans-serif;color:#555;margin:0 0 20px">Revisamos estos resultados contigo y te decimos qué cambiaríamos primero. La llamada es sin costo.</p>
+        <div style="padding-top:24px;border-top:1px solid #e6e6e6">
+          <h2 style="font:600 13px/1 sans-serif;letter-spacing:1px;text-transform:uppercase;color:#999;margin:0 0 12px">El siguiente paso</h2>
+          <p style="font:15px/1.6 sans-serif;color:#444;margin:0 0 24px">${overallVerdict(overall).next}</p>
+        </div>
+
+        <div style="text-align:center">
+          <p style="font:15px/1.5 sans-serif;color:#555;margin:0 0 20px">Lo revisamos contigo en 45 minutos y te decimos qué haríamos primero. La llamada es sin costo.</p>
           <a href="${CALENDAR_URL}" style="display:inline-block;background:#1a1a1a;color:#ffffff;font:600 14px/1 sans-serif;text-decoration:none;padding:14px 28px;border-radius:6px">Agenda tu llamada</a>
         </div>
 
@@ -508,47 +533,58 @@ async function handleEmailOptIn(
 }
 
 async function sendNotifications(email: string | null, domain: string, overall: number, scores: Scores, signals: Signals | null) {
-  const bar = (n: number | null) => n === null ? '— no medible' : `${'█'.repeat(Math.round(n / 10))}${'░'.repeat(10 - Math.round(n / 10))} ${n}/100`
-  const bool = (b: boolean) => b ? '✅' : '❌'
-
   const resendKey = process.env.RESEND_API_KEY
   if (!resendKey) return
 
   const resend = new Resend(resendKey)
   const to = process.env.INTERNAL_NOTIFY_EMAIL ?? 'director.arturo@artismamkt.com'
 
+  const flag = (ok: boolean, label: string) => `
+    <td width="50%" style="padding:5px 0;font:14px/1.4 sans-serif;color:${ok ? '#333' : '#c4453c'}">
+      <span style="display:inline-block;width:16px">${ok ? '&#10003;' : '&#10005;'}</span>${label}
+    </td>`
+
+  const signalRows = signals ? [
+    [signals.metaDesc, 'Meta description', signals.ogImage, 'OG Image'],
+    [signals.hasTracking, 'GA / GTM', signals.hasPixel, 'Meta Pixel'],
+    [signals.hasEmailMkt, 'Email marketing', signals.hasChat, 'Chat'],
+    [signals.hasForm, 'Formulario', signals.hasBlog, 'Blog / Contenido'],
+    [signals.hasNewsletter, 'Newsletter', null, ''],
+  ].map(([a, la, b, lb]) =>
+    `<tr>${flag(Boolean(a), String(la))}${b === null ? '<td></td>' : flag(Boolean(b), String(lb))}</tr>`
+  ).join('') : ''
+
   await resend.emails.send({
-    // Debe salir de un dominio verificado en Resend o el envio se rechaza.
-    from: process.env.RESEND_FROM ?? 'Artisma Analizador <reportes@reportes.artismamkt.com>',
+    from: RESEND_FROM,
     to,
     subject: `Nuevo diagnóstico: ${domain} — ${overall}/100${email ? '' : ' (sin correo)'}`,
     html: `
-      <h2 style="font-family:sans-serif">Nuevo diagnóstico de sitio web</h2>
-      <table style="font-family:monospace;border-collapse:collapse">
-        <tr><td style="padding:4px 12px 4px 0"><strong>Dominio</strong></td><td>${domain}</td></tr>
-        <tr><td style="padding:4px 12px 4px 0"><strong>Email</strong></td><td>${email ?? '— no proporcionado'}</td></tr>
-        <tr><td style="padding:4px 12px 4px 0"><strong>Score general</strong></td><td><strong>${overall}/100</strong></td></tr>
-      </table>
-      <h3 style="font-family:sans-serif;margin-top:24px">Scores por sección</h3>
-      <pre style="background:#f5f5f5;padding:12px;border-radius:4px">
-Velocidad:         ${bar(scores.velocidad)}
-SEO:               ${bar(scores.seo)}
-Visibilidad Google: ${bar(scores.googleVisibility)}
-Herramientas:      ${bar(scores.herramientas)}
-Captación:         ${bar(scores.captacion)}</pre>
-      ${signals ? `
-      <h3 style="font-family:sans-serif;margin-top:24px">Señales detectadas</h3>
-      <table style="font-family:sans-serif;font-size:14px;border-collapse:collapse">
-        <tr><td style="padding:3px 16px 3px 0">Meta description</td><td>${bool(signals.metaDesc)}</td></tr>
-        <tr><td style="padding:3px 16px 3px 0">OG Image</td><td>${bool(signals.ogImage)}</td></tr>
-        <tr><td style="padding:3px 16px 3px 0">GA / GTM</td><td>${bool(signals.hasTracking)}</td></tr>
-        <tr><td style="padding:3px 16px 3px 0">Meta Pixel</td><td>${bool(signals.hasPixel)}</td></tr>
-        <tr><td style="padding:3px 16px 3px 0">Email marketing</td><td>${bool(signals.hasEmailMkt)}</td></tr>
-        <tr><td style="padding:3px 16px 3px 0">Chat</td><td>${bool(signals.hasChat)}</td></tr>
-        <tr><td style="padding:3px 16px 3px 0">Formulario</td><td>${bool(signals.hasForm)}</td></tr>
-        <tr><td style="padding:3px 16px 3px 0">Blog / Contenido</td><td>${bool(signals.hasBlog)}</td></tr>
-        <tr><td style="padding:3px 16px 3px 0">Newsletter</td><td>${bool(signals.hasNewsletter)}</td></tr>
-      </table>` : ''}
+      <div style="max-width:560px;margin:0 auto;padding:32px 24px;font-family:sans-serif;color:#222">
+        <p style="font:600 11px/1 sans-serif;letter-spacing:2px;text-transform:uppercase;color:#a8862c;margin:0 0 16px">Nuevo diagnóstico</p>
+        <h1 style="font:600 22px/1.3 sans-serif;margin:0 0 24px">${domain}</h1>
+
+        <table style="width:100%;border-collapse:collapse;margin-bottom:8px">
+          <tr>
+            <td style="padding:8px 0;border-top:1px solid #e6e6e6;font:14px/1.4 sans-serif;color:#777">Contacto</td>
+            <td style="padding:8px 0;border-top:1px solid #e6e6e6;font:14px/1.4 sans-serif;color:${email ? '#222' : '#c4453c'};text-align:right">${email ?? 'No lo dejó'}</td>
+          </tr>
+          <tr>
+            <td style="padding:8px 0;border-top:1px solid #e6e6e6;font:14px/1.4 sans-serif;color:#777">Score general</td>
+            <td style="padding:8px 0;border-top:1px solid #e6e6e6;font:700 18px/1.2 sans-serif;color:${scoreColor(overall)};text-align:right">${overall}/100</td>
+          </tr>
+          <tr>
+            <td style="padding:8px 0;border-top:1px solid #e6e6e6;border-bottom:1px solid #e6e6e6;font:14px/1.4 sans-serif;color:#777">Veredicto</td>
+            <td style="padding:8px 0;border-top:1px solid #e6e6e6;border-bottom:1px solid #e6e6e6;font:14px/1.4 sans-serif;color:#555;text-align:right">${overallVerdict(overall).verdict}</td>
+          </tr>
+        </table>
+
+        <h2 style="font:600 13px/1 sans-serif;letter-spacing:1px;text-transform:uppercase;color:#999;margin:28px 0 4px">Scores por sección</h2>
+        <table style="width:100%;border-collapse:collapse">${scoreRowsHtml(scores)}</table>
+
+        ${signals ? `
+        <h2 style="font:600 13px/1 sans-serif;letter-spacing:1px;text-transform:uppercase;color:#999;margin:28px 0 4px">Señales detectadas</h2>
+        <table style="width:100%;border-collapse:collapse">${signalRows}</table>` : ''}
+      </div>
     `,
   }).catch(err => console.error('[api/analiza] resend send failed', err))
 }
