@@ -7,6 +7,30 @@ const WEBHOOK_DIAGNOSTICO = 'https://services.leadconnectorhq.com/hooks/21Q9Ac26
 
 const CALENDAR_URL = process.env.CALENDAR_URL ?? 'https://links.artismamkt.com/widget/booking/R2GlUF85rT7113z54MEW'
 
+// Vercel retiro su producto KV propio: el almacenamiento ahora se conecta
+// desde el Marketplace, y segun el proveedor las variables llegan como
+// KV_REST_API_* (Upstash via la integracion de Vercel) o como
+// UPSTASH_REDIS_REST_* . Se aceptan ambos nombres para que conectar el
+// store no dependa de cual haya elegido quien lo configuro.
+let kvClient: Awaited<ReturnType<typeof buildKv>> = null
+
+async function buildKv() {
+  const url = process.env.KV_REST_API_URL ?? process.env.UPSTASH_REDIS_REST_URL
+  const token = process.env.KV_REST_API_TOKEN ?? process.env.UPSTASH_REDIS_REST_TOKEN
+  if (!url || !token) return null
+  const { createClient } = await import('@vercel/kv')
+  return createClient({ url, token })
+}
+
+async function getKv() {
+  if (kvClient === null) kvClient = await buildKv()
+  return kvClient
+}
+
+const kvEnabled = () =>
+  Boolean((process.env.KV_REST_API_URL ?? process.env.UPSTASH_REDIS_REST_URL) &&
+          (process.env.KV_REST_API_TOKEN ?? process.env.UPSTASH_REDIS_REST_TOKEN))
+
 // Debe salir de un dominio verificado en Resend o el envio se rechaza.
 const RESEND_FROM = process.env.RESEND_FROM ?? 'Artisma <reportes@reportes.artismamkt.com>'
 
@@ -121,8 +145,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'invalid_domain' })
     }
 
-    if (process.env.KV_REST_API_URL) {
-      const { kv } = await import('@vercel/kv')
+    const kvRead = await getKv()
+    if (kvRead) {
+      const kv = kvRead
       const forwardedFor = req.headers['x-forwarded-for']
       const ip = typeof forwardedFor === 'string'
         ? forwardedFor.split(',')[0]?.trim() ?? 'unknown'
@@ -194,8 +219,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const scores: Scores = { velocidad, seo, googleVisibility, herramientas, captacion }
     const resultToken = randomUUID()
 
-    if (process.env.KV_REST_API_URL) {
-      const { kv } = await import('@vercel/kv')
+    const kvWrite = await getKv()
+    if (kvWrite) {
+      const kv = kvWrite
       const forwardedFor = req.headers['x-forwarded-for']
       const ip = typeof forwardedFor === 'string'
         ? forwardedFor.split(',')[0]?.trim() ?? 'unknown'
@@ -457,8 +483,8 @@ async function handleEmailOptIn(
     domain = ''
   }
 
-  if (process.env.KV_REST_API_URL) {
-    const { kv } = await import('@vercel/kv')
+  const kv = await getKv()
+  if (kv) {
     const emailKey = `analiza:email:${email.toLowerCase()}`
 
     if (await kv.get(emailKey)) {
@@ -512,7 +538,7 @@ async function handleEmailOptIn(
     console.warn('[api/analiza] email opt-in sin cache, usando scores del cliente', {
       domain,
       hasToken: Boolean(token),
-      kvEnabled: Boolean(process.env.KV_REST_API_URL),
+      kvEnabled: kvEnabled(),
     })
   }
 
