@@ -5,6 +5,26 @@ import { randomUUID } from 'node:crypto'
 
 const WEBHOOK_DIAGNOSTICO = 'https://services.leadconnectorhq.com/hooks/21Q9Ac26brV00Bu7vffn/webhook-trigger/46cf2dc2-7f69-4d43-a587-efc5243d6c70'
 
+const CALENDAR_URL = process.env.CALENDAR_URL ?? 'https://links.artismamkt.com/widget/booking/R2GlUF85rT7113z54MEW'
+
+// Debe salir de un dominio verificado en Resend o el envio se rechaza.
+const RESEND_FROM = process.env.RESEND_FROM ?? 'Artisma <reportes@reportes.artismamkt.com>'
+
+const SECTION_LABELS: Array<[keyof Scores, string]> = [
+  ['velocidad', 'Velocidad y experiencia en el celular'],
+  ['seo', 'Qué tan fácil te encuentran'],
+  ['googleVisibility', 'Si Google puede leer tu sitio'],
+  ['herramientas', 'Medición de visitantes'],
+  ['captacion', 'Facilidad para contactarte'],
+]
+
+function overallVerdict(n: number) {
+  if (n >= 85) return 'Tu sitio tiene bases sólidas.'
+  if (n >= 65) return 'Tu sitio está bien, pero puede ir mucho más lejos.'
+  if (n >= 40) return 'Tu sitio tiene oportunidades claras de mejora.'
+  return 'Tu sitio necesita atención urgente.'
+}
+
 const ALLOWED_ORIGINS = [
   'https://www.artismamkt.com',
   'https://artismamkt.com',
@@ -320,6 +340,69 @@ type Scores = { velocidad: number | null; seo: number; googleVisibility: number 
 
 type CachedResult = { domain: string; overall: number; scores: Scores }
 
+// Envia los resultados al prospecto. Solo se usa desde handleEmailOptIn,
+// es decir, unicamente en las landing pages: ahi la persona pide el correo
+// de forma explicita y hay que cumplirlo.
+//
+// La pagina principal no lo manda a proposito. Ahi el correo se pide antes
+// de analizar, no como una solicitud del visitante, y el seguimiento lo
+// cubren los workflows de GHL. Mandar ademas este correo seria duplicar.
+async function sendReportEmail(email: string, domain: string, overall: number, scores: Scores) {
+  const resendKey = process.env.RESEND_API_KEY
+  if (!resendKey) {
+    console.warn('[api/analiza] RESEND_API_KEY ausente — no se envio el reporte a', email)
+    return
+  }
+
+  const color = (n: number | null) => n === null ? '#888888' : n >= 75 ? '#3f9c54' : n >= 50 ? '#a8862c' : '#c4453c'
+
+  const rows = SECTION_LABELS.map(([key, label]) => {
+    const v = scores[key]
+    const width = v === null ? 0 : v
+    return `
+      <tr>
+        <td style="padding:10px 0 2px;font:14px/1.4 sans-serif;color:#333">${label}</td>
+        <td style="padding:10px 0 2px;font:600 14px/1.4 sans-serif;color:${color(v)};text-align:right">${v === null ? '—' : `${v}/100`}</td>
+      </tr>
+      <tr>
+        <td colspan="2" style="padding:0 0 6px">
+          <div style="height:6px;background:#ececec;border-radius:3px">
+            <div style="height:6px;width:${width}%;background:${color(v)};border-radius:3px"></div>
+          </div>
+        </td>
+      </tr>`
+  }).join('')
+
+  await new Resend(resendKey).emails.send({
+    from: RESEND_FROM,
+    to: email,
+    subject: `Tu diagnóstico web: ${domain} — ${overall}/100`,
+    html: `
+      <div style="max-width:560px;margin:0 auto;padding:32px 24px;font-family:sans-serif;color:#222">
+        <p style="font:600 11px/1 sans-serif;letter-spacing:2px;text-transform:uppercase;color:#a8862c;margin:0 0 16px">Diagnóstico web</p>
+        <h1 style="font:600 22px/1.3 sans-serif;margin:0 0 6px">${domain}</h1>
+        <p style="font:15px/1.5 sans-serif;color:#555;margin:0 0 28px">${overallVerdict(overall)}</p>
+
+        <div style="text-align:center;padding:24px 0;border-top:1px solid #e6e6e6;border-bottom:1px solid #e6e6e6;margin-bottom:8px">
+          <div style="font:700 40px/1 sans-serif;color:${color(overall)}">${overall}<span style="font-size:18px;color:#999">/100</span></div>
+          <div style="font:11px/1 sans-serif;letter-spacing:1.5px;text-transform:uppercase;color:#999;margin-top:8px">Puntuación general</div>
+        </div>
+
+        <table style="width:100%;border-collapse:collapse;margin-bottom:32px">${rows}</table>
+
+        <div style="text-align:center;padding-top:24px;border-top:1px solid #e6e6e6">
+          <p style="font:15px/1.5 sans-serif;color:#555;margin:0 0 20px">Revisamos estos resultados contigo y te decimos qué cambiaríamos primero. La llamada es sin costo.</p>
+          <a href="${CALENDAR_URL}" style="display:inline-block;background:#1a1a1a;color:#ffffff;font:600 14px/1 sans-serif;text-decoration:none;padding:14px 28px;border-radius:6px">Agenda tu llamada</a>
+        </div>
+
+        <p style="font:12px/1.5 sans-serif;color:#999;margin:32px 0 0;text-align:center">
+          Recibes esto porque solicitaste un diagnóstico en artismamkt.com<br>Artisma · contacto@artismamkt.com
+        </p>
+      </div>
+    `,
+  })
+}
+
 const clampScore = (v: unknown): number => {
   const n = typeof v === 'number' ? v : Number(v)
   return Number.isFinite(n) ? Math.min(100, Math.max(0, Math.round(n))) : 0
@@ -408,10 +491,23 @@ async function handleEmailOptIn(
     })
   }
 
+  waitUntil(
+    sendReportEmail(email, domain, overall, s)
+      .catch(err => console.error('[api/analiza] sendReportEmail failed', err))
+  )
+
+  // El aviso interno del analisis salio marcado "(sin correo)"; sin este
+  // segundo aviso no habria forma de enterarse por correo de que la
+  // persona si lo dejo despues.
+  waitUntil(
+    sendNotifications(email, domain, overall, s, null)
+      .catch(err => console.error('[api/analiza] sendNotifications failed', err))
+  )
+
   return res.status(200).json({ ok: true })
 }
 
-async function sendNotifications(email: string | null, domain: string, overall: number, scores: Scores, signals: Signals) {
+async function sendNotifications(email: string | null, domain: string, overall: number, scores: Scores, signals: Signals | null) {
   const bar = (n: number | null) => n === null ? '— no medible' : `${'█'.repeat(Math.round(n / 10))}${'░'.repeat(10 - Math.round(n / 10))} ${n}/100`
   const bool = (b: boolean) => b ? '✅' : '❌'
 
@@ -440,6 +536,7 @@ SEO:               ${bar(scores.seo)}
 Visibilidad Google: ${bar(scores.googleVisibility)}
 Herramientas:      ${bar(scores.herramientas)}
 Captación:         ${bar(scores.captacion)}</pre>
+      ${signals ? `
       <h3 style="font-family:sans-serif;margin-top:24px">Señales detectadas</h3>
       <table style="font-family:sans-serif;font-size:14px;border-collapse:collapse">
         <tr><td style="padding:3px 16px 3px 0">Meta description</td><td>${bool(signals.metaDesc)}</td></tr>
@@ -451,7 +548,7 @@ Captación:         ${bar(scores.captacion)}</pre>
         <tr><td style="padding:3px 16px 3px 0">Formulario</td><td>${bool(signals.hasForm)}</td></tr>
         <tr><td style="padding:3px 16px 3px 0">Blog / Contenido</td><td>${bool(signals.hasBlog)}</td></tr>
         <tr><td style="padding:3px 16px 3px 0">Newsletter</td><td>${bool(signals.hasNewsletter)}</td></tr>
-      </table>
+      </table>` : ''}
     `,
   }).catch(err => console.error('[api/analiza] resend send failed', err))
 }

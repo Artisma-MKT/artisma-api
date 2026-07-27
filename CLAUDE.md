@@ -50,9 +50,12 @@ Nada de Next.js, React, Tailwind. Solo Node.js + tipos de Vercel.
     "googleVisibility": 60,
     "herramientas": 40,
     "captacion": 65
-  }
+  },
+  "token": "uuid-para-adjuntar-el-correo-despues"
 }
 ```
+
+En `mode: 'email'` la respuesta es `{ "ok": true }`.
 
 Cualquier score puede ser `null` si no se pudo medir (ej. PageSpeed falló, sitio bloqueó scraping).
 
@@ -72,10 +75,34 @@ Todas configurables en Vercel Dashboard → Settings → Environment Variables:
 - `PAGESPEED_API_KEY` — Google Cloud Console → habilitar PageSpeed Insights API (gratis)
 
 **Opcionales (recomendadas para producción):**
-- `RESEND_API_KEY` — para enviar el email interno con el reporte detallado
-- `INTERNAL_NOTIFY_EMAIL` — a quién enviar el email (default: director.arturo@artismamkt.com)
+- `RESEND_API_KEY` — envía dos correos: el reporte al prospecto y la notificación interna. Sin esta variable no se manda ninguno de los dos (queda un `console.warn`).
+- `RESEND_FROM` — remitente. Default: `Artisma <reportes@reportes.artismamkt.com>`. **Debe ser un dominio verificado en Resend** o el envío se rechaza.
+- `INTERNAL_NOTIFY_EMAIL` — a quién enviar la notificación interna (default: director.arturo@artismamkt.com)
+- `CALENDAR_URL` — link del botón "Agenda tu llamada" en el correo del reporte
 - `KV_REST_API_URL` + `KV_REST_API_TOKEN` — activar rate limiting con Vercel KV
-  - Sin estas, no hay rate limit (cualquiera puede llamar la API cuantas veces quiera)
+  - Sin estas, **no hay rate limit** (cualquiera puede llamar la API cuantas veces quiera)
+  - También desactiva el cache de resultados, así que el opt-in de correo usa los scores que reenvía el cliente
+
+## Correo: quién recibe qué
+
+| Correo | Motor | Destinatario | Cuándo |
+|---|---|---|---|
+| Reporte con los scores + CTA al calendario | Resend | El prospecto | Inmediato, **solo desde landing pages** (`mode: 'email'`) |
+| `Nuevo diagnóstico: [dominio] — [score]/100` | Resend | `INTERNAL_NOTIFY_EMAIL` | Al terminar el análisis, y otra vez si después llega el correo |
+| Seguimiento comercial según el score | Workflow de GHL | El prospecto | 1 hora después de crearse el contacto |
+
+El reporte por correo **no se manda desde la página principal**. Ahí el correo se pide antes de analizar, no es una solicitud del visitante, y el seguimiento lo cubre GHL. En las landing pages sí, porque la persona lo pidió explícitamente.
+
+## El correo es opcional
+
+La página principal lo pide antes de analizar. Las landing pages entregan el reporte sin pedirlo y lo ofrecen como opcional al final, porque ahí el objetivo es que agenden una llamada y el muro de correo compite con esa conversión.
+
+Por eso el endpoint tiene dos modos:
+
+- **Sin `mode`** — analiza el sitio. `email` es opcional. Devuelve `token`, que referencia el resultado cacheado una hora en KV.
+- **`mode: 'email'`** — adjunta un correo a un análisis ya hecho. No reanaliza: recupera los scores por `token`. Sin KV acepta los scores que reenvía el cliente, saneados a enteros de 0 a 100.
+
+Sin correo no se dispara el webhook de GHL: no hay contacto que crear. Se dispara después, si la persona pide los resultados desde el reporte.
 
 ## CORS
 
